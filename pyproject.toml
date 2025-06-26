@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "netcor"
+name = "pynetcor"
 version = "0.1.0"
 description = "pyNetCor: Correlation and information theory tools (C++/Python bindings)"
 authors = ["Your Name <your@email.com>"]
