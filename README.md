@@ -6,7 +6,7 @@
 
 ## Features
 
-- Calculate correlation matrix using Pearson, Spearman, or Kendall methods
+- Calculate correlation matrix using Pearson, Spearman, Kendall, Phi, Mutual Information methods
 - Processing large-scale computation in chunks (larger than RAM)
 - Find top-k and differential correlations between each row of two arrays
 - Efficient P-value approximation and multiple testing correction
