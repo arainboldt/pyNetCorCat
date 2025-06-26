@@ -28,6 +28,7 @@ std::string version() {
 void bind_cor(py::module &m);
 void bind_chunked_cor(py::module &m);
 void bind_cluster(py::module &m);
+void bind_mutual_info(py::module &m);
 
 PYBIND11_MODULE(_core, m) {
 m.def("version", &version, "A function that returns the version");
@@ -35,4 +36,5 @@ m.attr("__version__") = version();
 bind_cor(m);
 bind_chunked_cor(m);
 bind_cluster(m);
+bind_mutual_info(m);
 }

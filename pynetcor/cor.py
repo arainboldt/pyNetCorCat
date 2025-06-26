@@ -13,6 +13,13 @@ __all__ = [
     "chunked_corrcoef",
     "chunked_cortest",
     "pvalue_student_t",
+    "phi_coef",
+    "phi_test",
+    "pvalue_chi_square",
+    "mutual_info_coef",
+    "mutual_info_test",
+    "normalize_mutual_info",
+    "mutual_info_pvalues",
 ]
 
 
@@ -172,6 +179,155 @@ def cortest(
         approx_adjust_pvalue,
         threads,
     )
+
+
+def phi_coef(x, y=None, threshold: float = 0.5, threads: int = 1) -> ndarray:
+    """
+    Calculate the phi coefficient (correlation for binary variables) between each row of two arrays.
+
+    The phi coefficient measures the association between two binary variables and is equivalent
+    to Pearson correlation for binary variables. It ranges from -1 to 1.
+
+    Parameters
+    ----------
+    x : array_like
+        A 1-D or 2-D array. Continuous data that will be binarized using the threshold.
+    y : array_like, optional
+        A 1-D or 2-D array. `y` has the same column length as `x`. If not provided, the phi coefficient will be
+        calculated between `x` and itself.
+    threshold : float, default 0.5
+        Threshold for binarization. Values >= threshold become 1, values < threshold become 0.
+    threads : int, default 1
+        The number of threads to use.
+
+    Returns
+    -------
+    ndarray
+        A 2D array representing the matrix of phi coefficients.
+
+    Examples
+    --------
+    >>> x = np.array([[0.1, 0.8, 0.3, 0.9],
+    ...               [0.2, 0.7, 0.4, 0.6]])
+    >>> phi_coef(x, threshold=0.5)
+    array([[1.        , 0.57735027],
+           [0.57735027, 1.        ]])
+
+    Notes
+    -----
+    The phi coefficient is calculated by:
+    1. Binarizing the input data using the threshold
+    2. Creating a 2x2 contingency table for each pair of variables
+    3. Computing φ = (ad - bc) / sqrt((a+b)(c+d)(a+c)(b+d))
+       where a, b, c, d are the contingency table counts
+    """
+    if threads < 1:
+        raise ValueError("The number of threads must be greater than 0.")
+
+    return phiCoef(x, y, threshold, threads)
+
+
+def phi_test(
+    x,
+    y=None,
+    threshold: float = 0.5,
+    approx_pvalue: bool = True,
+    adjust_pvalue: bool = False,
+    adjust_method: str = "BH",
+    approx_adjust_pvalue: bool = False,
+    threads: int = 1,
+) -> ndarray:
+    """
+    Testing for phi coefficient between each row of two arrays with p-values.
+
+    Parameters
+    ----------
+    x : array_like
+        A 1-D or 2-D array. Continuous data that will be binarized using the threshold.
+    y : array_like, optional
+        A 1-D or 2-D array. `y` has the same column length as `x`. If not provided, the phi coefficient will be
+        calculated between `x` and itself.
+    threshold : float, default 0.5
+        Threshold for binarization. Values >= threshold become 1, values < threshold become 0.
+    approx_pvalue : bool, default True
+        Whether to use the approximation method of p-value calculation.
+    adjust_pvalue : bool, default False
+        Set this parameter to adjust p-value for multiple hypothesis testing.
+    adjust_method : {'holm', 'hochberg', 'bonferroni', 'BH', 'BY'}, default 'BH'
+        The method used to adjust p-value for multiple hypothesis testing.
+    approx_adjust_pvalue : bool, default False
+        Whether to use the approximation method of p-value adjustment.
+    threads : int, default 1
+        The number of threads to use.
+
+    Returns
+    -------
+    ndarray
+        A 2D array with 4 columns: [index1, index2, phi, p],
+        or 5 columns if adjust_pvalue is True: [index1, index2, phi, p, p_adjusted]
+
+    Examples
+    --------
+    >>> x = np.array([[0.1, 0.8, 0.3, 0.9],
+    ...               [0.2, 0.7, 0.4, 0.6]])
+    >>> phi_test(x, threshold=0.5)
+    array([[0.        , 1.        , 0.57735027, 0.42365079]])
+
+    Notes
+    -----
+    P-values are calculated using the chi-square test: χ² = n * φ²
+    where n is the sample size and φ is the phi coefficient.
+    """
+    if threads < 1:
+        raise ValueError("The number of threads must be greater than 0.")
+
+    return phiTest(
+        x,
+        y,
+        threshold,
+        approx_pvalue,
+        adjust_pvalue,
+        adjust_method,
+        approx_adjust_pvalue,
+        threads,
+    )
+
+
+def pvalue_chi_square(x, n: int, approx: bool = True, threads: int = 1) -> ndarray:
+    """
+    Calculate the p-value for phi coefficients using the chi-square distribution.
+
+    Parameters
+    ----------
+    x : array_like
+        Array of phi coefficients.
+    n : int
+        The sample size used to calculate the phi coefficients.
+    approx : bool, default True
+        Whether to use the approximation method of p-value calculation.
+    threads : int, default 1
+        The number of threads to use.
+
+    Returns
+    -------
+    ndarray
+        Array has the same shape as `x`.
+
+    Examples
+    --------
+    >>> phi_coeffs = np.array([0.5, 0.8, 0.2])
+    >>> pvalue_chi_square(phi_coeffs, n=100)
+    array([0.00000000e+00, 0.00000000e+00, 4.47213595e-01])
+
+    Notes
+    -----
+    The chi-square statistic is calculated as χ² = n * φ²
+    where n is the sample size and φ is the phi coefficient.
+    """
+    if threads < 1:
+        raise ValueError("The number of threads must be greater than 0.")
+
+    return pvalueChiSquare(x, n, approx, threads)
 
 
 class CorrcoefIterator:
@@ -521,3 +677,135 @@ def cor_topkdiff(
         chunk_size,
         threads,
     )
+
+
+def mutual_info_coef(
+    x, y=None, bins: int = 10, method: str = "equal_width", threads: int = 1
+) -> ndarray:
+    """
+    Calculate mutual information between variables.
+
+    Parameters
+    ----------
+    x : array_like
+        Input data matrix
+    y : array_like, optional
+        Second data matrix
+    bins : int, default 10
+        Number of bins for discretization
+    method : {'equal_width', 'equal_frequency', 'adaptive'}, default 'equal_width'
+        Discretization method
+    threads : int, default 1
+        Number of threads for parallel computation
+
+    Returns
+    -------
+    ndarray
+        Mutual information matrix
+    """
+    if threads < 1:
+        raise ValueError("The number of threads must be greater than 0.")
+
+    if bins < 2:
+        raise ValueError("The number of bins must be at least 2.")
+
+    return mutualInfoCoef(x, y, bins, method, threads)
+
+
+def mutual_info_test(
+    x,
+    y=None,
+    bins: int = 10,
+    method: str = "equal_width",
+    approx_pvalue: bool = True,
+    adjust_pvalue: bool = False,
+    adjust_method: str = "BH",
+    approx_adjust_pvalue: bool = False,
+    threads: int = 1,
+) -> ndarray:
+    """
+    Test for mutual information with p-values.
+
+    Parameters
+    ----------
+    x : array_like
+        Input data matrix
+    y : array_like, optional
+        Second data matrix
+    bins : int, default 10
+        Number of bins for discretization
+    method : {'equal_width', 'equal_frequency', 'adaptive'}, default 'equal_width'
+        Discretization method
+    approx_pvalue : bool, default True
+        Whether to calculate approximate p-values
+    adjust_pvalue : bool, default False
+        Whether to adjust p-values for multiple testing
+    adjust_method : str, default 'BH'
+        Method for p-value adjustment
+    approx_adjust_pvalue : bool, default False
+        Whether to use approximation for p-value adjustment
+    threads : int, default 1
+        Number of threads for parallel computation
+
+    Returns
+    -------
+    ndarray
+        Array with columns: [index1, index2, mi, pvalue] or [index1, index2, mi, pvalue, p_adjusted]
+    """
+    if threads < 1:
+        raise ValueError("The number of threads must be greater than 0.")
+
+    if bins < 2:
+        raise ValueError("The number of bins must be at least 2.")
+
+    return mutualInfoTest(
+        x, y, bins, method, approx_pvalue, adjust_pvalue, adjust_method, approx_adjust_pvalue, threads
+    )
+
+
+def normalize_mutual_info(x, normalization_method: str = "min_max") -> ndarray:
+    """
+    Normalize mutual information values.
+
+    Parameters
+    ----------
+    x : array_like
+        Mutual information values to normalize
+    normalization_method : str, default 'min_max'
+        Normalization method ('min_max', 'z_score', 'none')
+
+    Returns
+    -------
+    ndarray
+        Normalized mutual information values
+    """
+    return normalizeMutualInfo(x, normalization_method)
+
+
+def mutual_info_pvalues(x, n_samples: int, n_permutations: int = 1000, threads: int = 1) -> ndarray:
+    """
+    Calculate p-values for mutual information values using permutation tests.
+
+    Parameters
+    ----------
+    x : array_like
+        Mutual information values
+    n_samples : int
+        Number of samples used in MI calculation
+    n_permutations : int, default 1000
+        Number of permutations for significance testing
+    threads : int, default 1
+        Number of threads for parallel computation
+
+    Returns
+    -------
+    ndarray
+        Array of p-values
+    """
+    if threads < 1:
+        raise ValueError("The number of threads must be greater than 0.")
+
+    if n_permutations < 1:
+        raise ValueError("The number of permutations must be at least 1.")
+
+    return mutualInfoPvalues(x, n_samples, n_permutations, threads)

@@ -9,7 +9,9 @@
 enum class CorrelationMethod {
     Pearson = 1,
     Spearman = 2,
-    Kendall = 3
+    Kendall = 3,
+    Phi = 4,
+    MutualInfo = 5
 };
 
 inline CorrelationMethod stringToCorrelationMethod(const std::string& str) {
@@ -19,6 +21,10 @@ inline CorrelationMethod stringToCorrelationMethod(const std::string& str) {
         return CorrelationMethod::Spearman;
     } else if (str == "kendall") {
         return CorrelationMethod::Kendall;
+    } else if (str == "phi") {
+        return CorrelationMethod::Phi;
+    } else if (str == "mutual_info" || str == "mutualinfo") {
+        return CorrelationMethod::MutualInfo;
     } else {
         throw std::runtime_error("Unknown correlation method.");
     }
@@ -32,6 +38,10 @@ inline std::string toString(const CorrelationMethod corMethod) {
             return "Spearman";
         case CorrelationMethod::Kendall:
             return "Kendall";
+        case CorrelationMethod::Phi:
+            return "Phi";
+        case CorrelationMethod::MutualInfo:
+            return "MutualInfo";
         default:
             throw std::runtime_error("Unknown correlation method.");
     }
@@ -69,10 +79,11 @@ inline std::string toString(const NAMethod naMethod) {
     }
 }
 
-// Supported distribution types: normal, t
+// Supported distribution types: normal, t, chi-square
 enum class DistributionType {
     Normal = 1,
     T = 2,
+    ChiSquare = 3
 };
 
 inline DistributionType stringToDistributionType(const std::string& str) {
@@ -80,6 +91,8 @@ inline DistributionType stringToDistributionType(const std::string& str) {
         return DistributionType::Normal;
     } else if (str == "t") {
         return DistributionType::T;
+    } else if (str == "chi-square") {
+        return DistributionType::ChiSquare;
     } else {
         throw std::runtime_error("Unknown distribution type.");
     }
@@ -91,6 +104,8 @@ inline std::string toString(const DistributionType distType) {
             return "normal";
         case DistributionType::T:
             return "t";
+        case DistributionType::ChiSquare:
+            return "chi-square";
         default:
             throw std::runtime_error("Unknown distribution type.");
     }
@@ -169,6 +184,7 @@ inline std::string toString(const PreTestMethod pretestMethod) {
 enum class DistanceMethodType {
     Pearson = 1,
     Spearman = 2,
+    MutualInfo = 3,
 };
 
 inline DistanceMethodType stringToDistanceMethodType(const std::string& str) {
@@ -176,6 +192,8 @@ inline DistanceMethodType stringToDistanceMethodType(const std::string& str) {
         return DistanceMethodType::Pearson;
     } else if (str == "spearman") {
         return DistanceMethodType::Spearman;
+    } else if (str == "mutual_info" || str == "mutualinfo") {
+        return DistanceMethodType::MutualInfo;
     } else {
         throw std::runtime_error("Unknown distance method.");
     }
@@ -187,6 +205,8 @@ inline std::string toString(const DistanceMethodType distanceMethodType) {
             return "pearson";
         case DistanceMethodType::Spearman:
             return "spearman";
+        case DistanceMethodType::MutualInfo:
+            return "mutual_info";
         default:
             throw std::runtime_error("Unknown distance method.");
     }

@@ -19,10 +19,12 @@ set(PNC_VERSION_MAJOR "0" CACHE STRING "Major version number")
 set(PNC_VERSION_MINOR "0" CACHE STRING "Minor version number")
 set(PNC_VERSION_PATCH "0" CACHE STRING "Patch version number")
 
-add_subdirectory(../external/pybind11 pybind11_build)
+# Use system pybind11 instead of external
+find_package(pybind11 REQUIRED)
+
 add_subdirectory(../src pyNetCor_build)
 
-set(SOURCES _core/pyNetCor.cpp _core/cor.cpp _core/chunked_cor.cpp _core/cluster.cpp)
+set(SOURCES _core/pyNetCor.cpp _core/cor.cpp _core/chunked_cor.cpp _core/cluster.cpp _core/mutual_info.cpp)
 
 include_directories(${pybind11_INCLUDE_DIR} ${PYTHON_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/_core)
 pybind11_add_module(_core ${SOURCES})

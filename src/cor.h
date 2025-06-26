@@ -5,6 +5,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <boost/math/distributions/chi_squared.hpp>
 
 #include "ptable.h"
 #include "padjusttable.h"
@@ -156,6 +157,93 @@ private:
 
     // Sort in place, ordered by the first array.
     static void zipSort(double *x, double *y, size_t n);
+};
+
+/**
+ * @brief Class for calculating phi coefficient (correlation for binary variables).
+ * 
+ * Phi coefficient measures the association between two binary variables.
+ * It is equivalent to Pearson correlation for binary variables and ranges from -1 to 1.
+ */
+class CorPhi {
+public:
+    CorPhi() {};
+
+    ~CorPhi() {};
+
+    /**
+     * @brief Calculates phi coefficient matrix between rows of matrices X and Y in parallel.
+     * 
+     * @param X Input matrix X
+     * @param Y Input matrix Y (if empty, calculates phi between X and itself)
+     * @param result Pointer to store the result matrix
+     * @param nthreads Number of threads for parallel computation
+     * @param threshold Threshold for binarization (default: 0.5)
+     */
+    static void parallelCalcCor(Matrix<double> &X, Matrix<double> &Y, 
+                               double *result, int nthreads, double threshold = 0.5);
+
+    /**
+     * @brief Calculates phi coefficient between two vectors.
+     * 
+     * @param x First vector
+     * @param y Second vector
+     * @param n Length of vectors
+     * @param threshold Threshold for binarization (default: 0.5)
+     * @return Phi coefficient value
+     */
+    static double calcCor(const double *x, const double *y, size_t n, double threshold = 0.5);
+
+    /**
+     * @brief Calculates p-value for phi coefficient using chi-square test.
+     * 
+     * @param phi Phi coefficient value
+     * @param n Sample size
+     * @param ptable PTable object for p-value calculation
+     * @return P-value
+     */
+    static double calcPvalue(double phi, size_t n, const PTable &ptable);
+
+    /**
+     * @brief Common calculation function for p-values using chi-square distribution.
+     * 
+     * @param phi Phi coefficient value
+     * @param n Sample size
+     * @param dist Chi-square distribution
+     * @return P-value
+     */
+    static double commonCalcPvalue(double phi, size_t n, const boost::math::chi_squared &dist);
+
+private:
+    /**
+     * @brief Binarizes continuous data using a threshold.
+     * 
+     * @param data Input data array
+     * @param n Length of data array
+     * @param threshold Threshold for binarization
+     */
+    static void binarize(double *data, size_t n, double threshold);
+
+    /**
+     * @brief Calculates phi coefficient from contingency table.
+     * 
+     * @param a Count of (1,1) pairs
+     * @param b Count of (1,0) pairs
+     * @param c Count of (0,1) pairs
+     * @param d Count of (0,0) pairs
+     * @return Phi coefficient value
+     */
+    static double calcPhiFromContingency(int a, int b, int c, int d);
+
+    /**
+     * @brief Creates contingency table from binary vectors.
+     * 
+     * @param x First binary vector
+     * @param y Second binary vector
+     * @param n Length of vectors
+     * @return Contingency table [a, b, c, d]
+     */
+    static std::vector<int> createContingencyTable(const double *x, const double *y, size_t n);
 };
 
 #endif // COR_H

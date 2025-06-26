@@ -284,6 +284,177 @@ py_cdarray_t cortest(const py::object &xobj, const std::optional<py::object> &yo
     return result;
 }
 
+// Phi Coefficient Functions
+
+py_cdarray_t phi_coef(const py::object &xobj, const std::optional<py::object> &yobj, 
+                      double threshold, int nthreads) {
+    // Convert python object(numpy array or list) to matrix
+    Matrix<double> X = convert_to_matrix(xobj);
+    if (X.cols() < 2) {
+        throw std::invalid_argument("Input array must have length at least 2");
+    }
+
+    size_t resultRows = X.rows();
+    size_t resultCols = X.rows();
+    Matrix<double> Y;
+    
+    // If yobj is not None, then we need to convert python object(numpy array or list) to matrix
+    if (yobj.has_value()) {
+        Y = convert_to_matrix(yobj.value());
+        if (X.cols() != Y.cols()) {
+            throw std::invalid_argument("Input arrays x and y must have the same number of columns");
+        }
+        resultCols = Y.rows();
+    }
+
+    auto result = py_cdarray_t(
+            {resultRows, resultCols},
+            {resultCols * sizeof(double), sizeof(double)});
+
+    CorPhi::parallelCalcCor(X, Y, result.mutable_data(), nthreads, threshold);
+
+    return result;
+}
+
+py_cdarray_t phi_test(const py::object &xobj, const std::optional<py::object> &yobj,
+                      double threshold, bool isPvalueApprox, bool isMultipletest,
+                      const std::string &multipletestMethod, bool isQvalueApprox, int nthreads) {
+    auto pAdjustMethod = stringToPAdjustMethod(multipletestMethod);
+
+    // Convert python object(numpy array or list) to matrix
+    Matrix<double> X = convert_to_matrix(xobj);
+    if (X.cols() < 2) {
+        throw std::invalid_argument("Input array must have length at least 2");
+    }
+
+    size_t resultCorRows = X.rows();
+    size_t resultCorCols = X.rows();
+    size_t resultCorSize = resultCorRows * (resultCorRows - 1) / 2;
+    
+    Matrix<double> Y;
+    if (yobj.has_value()) {
+        Y = convert_to_matrix(yobj.value());
+        if (X.cols() != Y.cols()) {
+            throw std::invalid_argument("Input X and Y must have same number of columns");
+        }
+        resultCorCols = Y.rows();
+        resultCorSize = resultCorRows * resultCorCols;
+    }
+
+    // If user specify isPvalueApprox and resultCorSize > (2 * PTABLE_SIZE),
+    // then we need to initialize PTable used to calculate approximate p-value
+    if (isPvalueApprox && resultCorSize < (2 * PTABLE_SIZE)) {
+        isPvalueApprox = false;
+    }
+    // isQvalueApprox is the same as above
+    if (isQvalueApprox && resultCorSize < (2 * PADJUSTTABLE_SIZE)) {
+        isQvalueApprox = false;
+    }
+
+    // Result matrix with 4 columns: [index1, index2, phi, pvalue] or 5 columns: [index1, index2, phi, pvalue, qvalue]
+    size_t resultCols = isMultipletest ? 5 : 4;
+    py_cdarray_t result({resultCorSize, resultCols}, {resultCols * sizeof(double), sizeof(double)});
+    auto mutableResult = result.mutable_unchecked<2>();
+
+    PAdjustTable qtable;
+    if (isMultipletest && isQvalueApprox) {
+        qtable = PAdjustTable(X, Y, resultCorSize, CorrelationMethod::Phi, pAdjustMethod, nthreads);
+    }
+
+    Matrix<double> resultPhi(resultCorRows, resultCorCols);
+    CorPhi::parallelCalcCor(X, Y, resultPhi.data(), nthreads, threshold);
+
+    // Initialize PTable for chi-square distribution if isPvalueApprox is true
+    PTable ptable;
+    boost::math::chi_squared dist(1);
+    if (isPvalueApprox) {
+        ptable = PTable(DistributionType::ChiSquare, 1);
+    } else {
+        dist = boost::math::chi_squared(1);
+    }
+
+    bool isYEmpty = Y.isEmpty();
+    size_t n = X.cols();
+
+#pragma omp parallel for schedule(dynamic) num_threads(nthreads)
+    for (int64_t i = 0; i < resultCorRows; ++i) {
+        if (isYEmpty) {
+            for (size_t j = i + 1; j < resultCorCols; ++j) {
+                size_t index1 = util::transFullMatIndex(i, j, resultCorCols);
+                mutableResult(index1, 0) = i;
+                mutableResult(index1, 1) = j;
+                double phi = resultPhi(i, j);
+                mutableResult(index1, 2) = phi;
+                if (isPvalueApprox) {
+                    mutableResult(index1, 3) = CorPhi::calcPvalue(phi, n, ptable);
+                } else {
+                    mutableResult(index1, 3) = CorPhi::commonCalcPvalue(phi, n, dist);
+                }
+            }
+        } else {
+            for (size_t j = 0; j < resultCorCols; ++j) {
+                size_t index1 = i * resultCorCols + j;
+                mutableResult(index1, 0) = i;
+                mutableResult(index1, 1) = j;
+                double phi = resultPhi(i, j);
+                mutableResult(index1, 2) = phi;
+                if (isPvalueApprox) {
+                    mutableResult(index1, 3) = CorPhi::calcPvalue(phi, n, ptable);
+                } else {
+                    mutableResult(index1, 3) = CorPhi::commonCalcPvalue(phi, n, dist);
+                }
+            }
+        }
+    }
+
+    // Multiple test adjustment if isMultipletest is true
+    if (isMultipletest) {
+        if (isQvalueApprox) {
+#pragma omp parallel for schedule(dynamic) num_threads(nthreads)
+            for (int64_t i = 0; i < resultCorSize; ++i) {
+                mutableResult(i, 4) = qtable.getQvalue(mutableResult(i, 3));
+            }
+        } else {
+            auto temp = result[py::make_tuple(py::ellipsis(), 3)].cast<py_cdarray_t>();
+            auto qvalues = PAdjustTable::commonPAdjust(temp.data(), resultCorSize, pAdjustMethod);
+            for (size_t i = 0; i < resultCorSize; ++i) {
+                mutableResult(i, 4) = qvalues[i];
+            }
+        }
+    }
+
+    return result;
+}
+
+py_cdarray_t pvalue_chi_square(const py::object &obj, size_t n, bool isApproximate, int nthreads) {
+    auto arr = obj.cast<py_cdarray_t>();
+
+    // Build pvalue array that has same shape as input
+    std::vector<size_t> shape;
+    for (size_t i = 0; i < arr.ndim(); ++i) {
+        shape.push_back(arr.shape()[i]);
+    }
+
+    py_cdarray_t result(shape);
+    auto mutableResult = result.mutable_data();
+
+    if (isApproximate && arr.size() > (2 * PTABLE_SIZE)) {
+        PTable ptable(DistributionType::ChiSquare, 1);
+#pragma omp parallel for schedule(guided) num_threads(nthreads)
+        for (int64_t i = 0; i < arr.size(); ++i) {
+            mutableResult[i] = CorPhi::calcPvalue(arr.data()[i], n, ptable);
+        }
+    } else {
+        boost::math::chi_squared dist(1);
+#pragma omp parallel for schedule(guided) num_threads(nthreads)
+        for (int64_t i = 0; i < arr.size(); ++i) {
+            mutableResult[i] = CorPhi::commonCalcPvalue(arr.data()[i], n, dist);
+        }
+    }
+
+    return result;
+}
+
 void bind_cor(py::module &m) {
     m.def("corrCoef", &corrcoef, "Calculate correlation matrix, support pearson, spearman and kendall", py::arg("x"),
           py::arg("y"), py::arg("method"), py::arg("naAction"), py::arg("nthreads"));
@@ -292,4 +463,13 @@ void bind_cor(py::module &m) {
     m.def("corTest", &cortest, "Test for correlation matrix, support pearson, spearman and kendall",
           py::arg("x"), py::arg("y"), py::arg("method"), py::arg("naAction"), py::arg("isPvalueApprox"),
           py::arg("isMultipletest"), py::arg("multipletestMethod"), py::arg("isQvalueApprox"), py::arg("nthreads"));
+    
+    // Phi coefficient functions
+    m.def("phiCoef", &phi_coef, "Calculate phi coefficient matrix (correlation for binary variables)",
+          py::arg("x"), py::arg("y"), py::arg("threshold"), py::arg("nthreads"));
+    m.def("phiTest", &phi_test, "Test for phi coefficient matrix with p-values and multiple testing",
+          py::arg("x"), py::arg("y"), py::arg("threshold"), py::arg("isPvalueApprox"),
+          py::arg("isMultipletest"), py::arg("multipletestMethod"), py::arg("isQvalueApprox"), py::arg("nthreads"));
+    m.def("pvalueChiSquare", &pvalue_chi_square, "Calculate p-value using chi-square distribution",
+          py::arg("x"), py::arg("n"), py::arg("isApproximate"), py::arg("nthreads"));
 }

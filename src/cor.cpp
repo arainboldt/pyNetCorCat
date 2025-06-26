@@ -5,6 +5,7 @@
 #include <random>
 #include <cstdint>
 #include <cblas.h>
+#include <boost/math/distributions/chi_squared.hpp>
 
 #include "preprocessor.h"
 
@@ -397,4 +398,168 @@ void CorKendall::zipSort(double *x, double *y, size_t n) {
         x[i] = pairs[i].first;
         y[i] = pairs[i].second;
     }
+}
+
+// Phi Coefficient Implementation
+
+void CorPhi::parallelCalcCor(Matrix<double> &X, Matrix<double> &Y, double *result, int nthreads, double threshold) {
+    size_t nrows = X.rows();
+    size_t ncols = Y.isEmpty() ? X.rows() : Y.rows();
+
+    // Create temporary matrices for binarized data
+    Matrix<double> X_binary = X;
+    Matrix<double> Y_binary;
+    
+    if (!Y.isEmpty()) {
+        Y_binary = Y;
+    }
+
+    // Binarize data in parallel
+#pragma omp parallel for schedule(dynamic) num_threads(nthreads)
+    for (int64_t i = 0; i < X_binary.rows(); ++i) {
+        binarize(X_binary.row(i), X_binary.cols(), threshold);
+    }
+
+    if (!Y.isEmpty()) {
+#pragma omp parallel for schedule(dynamic) num_threads(nthreads)
+        for (int64_t i = 0; i < Y_binary.rows(); ++i) {
+            binarize(Y_binary.row(i), Y_binary.cols(), threshold);
+        }
+    }
+
+    // Calculate phi coefficients in parallel
+#pragma omp parallel for schedule(dynamic) num_threads(nthreads)
+    for (int64_t i = 0; i < nrows; ++i) {
+        if (Y.isEmpty()) {
+            // Self-correlation: calculate phi between X and itself
+            for (size_t j = i + 1; j < ncols; ++j) {
+                double phi = calcCor(X_binary.row(i), X_binary.row(j), X_binary.cols(), threshold);
+                result[i * ncols + j] = phi;
+            }
+            // Set diagonal to 1.0 (perfect correlation with itself)
+            if (i < ncols) {
+                result[i * ncols + i] = 1.0;
+            }
+            // Fill lower triangle symmetrically
+            for (size_t j = 0; j < i; ++j) {
+                result[i * ncols + j] = result[j * ncols + i];
+            }
+        } else {
+            // Cross-correlation: calculate phi between X and Y
+            for (size_t j = 0; j < ncols; ++j) {
+                double phi = calcCor(X_binary.row(i), Y_binary.row(j), X_binary.cols(), threshold);
+                result[i * ncols + j] = phi;
+            }
+        }
+    }
+}
+
+double CorPhi::calcCor(const double *x, const double *y, size_t n, double threshold) {
+    // Check for edge cases
+    if (n < 2) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    // Create temporary arrays for binarized data
+    std::unique_ptr<double[]> x_binary(new double[n]);
+    std::unique_ptr<double[]> y_binary(new double[n]);
+    
+    // Copy and binarize data
+    std::memcpy(x_binary.get(), x, n * sizeof(double));
+    std::memcpy(y_binary.get(), y, n * sizeof(double));
+    
+    binarize(x_binary.get(), n, threshold);
+    binarize(y_binary.get(), n, threshold);
+
+    // Create contingency table
+    std::vector<int> contingency = createContingencyTable(x_binary.get(), y_binary.get(), n);
+    
+    // Calculate phi coefficient from contingency table
+    return calcPhiFromContingency(contingency[0], contingency[1], contingency[2], contingency[3]);
+}
+
+double CorPhi::calcPvalue(double phi, size_t n, const PTable &ptable) {
+    if (std::isnan(phi)) {
+        return std::numeric_limits<double>::quiet_NaN();
+    } else if (std::abs(std::abs(phi) - 1) < 1e-8) {
+        return MIN_PVALUE;
+    }
+
+    // Chi-square statistic: χ² = n * φ²
+    double chi_sq = n * phi * phi;
+    return ptable.getPvalue(chi_sq);
+}
+
+double CorPhi::commonCalcPvalue(double phi, size_t n, const boost::math::chi_squared &dist) {
+    if (std::isnan(phi)) {
+        return std::numeric_limits<double>::quiet_NaN();
+    } else if (std::abs(std::abs(phi) - 1) < 1e-8) {
+        return MIN_PVALUE;
+    }
+
+    // Chi-square statistic: χ² = n * φ²
+    double chi_sq = n * phi * phi;
+
+    try {
+        double ptmp = boost::math::cdf(dist, chi_sq);
+        return 2 * std::min(ptmp, 1 - ptmp);
+    } catch (const std::domain_error &e) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+}
+
+void CorPhi::binarize(double *data, size_t n, double threshold) {
+    for (size_t i = 0; i < n; ++i) {
+        if (std::isnan(data[i])) {
+            data[i] = 0.0; // Treat NaN as 0
+        } else {
+            data[i] = (data[i] >= threshold) ? 1.0 : 0.0;
+        }
+    }
+}
+
+double CorPhi::calcPhiFromContingency(int a, int b, int c, int d) {
+    // Contingency table:
+    //         Y=0  Y=1
+    // X=0      d    b
+    // X=1      c    a
+    
+    int n = a + b + c + d;
+    if (n == 0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    // Check for edge cases
+    if (a == n || b == n || c == n || d == n) {
+        // All values are the same
+        return 0.0;
+    }
+
+    // Phi coefficient formula: φ = (ad - bc) / sqrt((a+b)(c+d)(a+c)(b+d))
+    double numerator = static_cast<double>(a * d - b * c);
+    double denominator = std::sqrt(static_cast<double>((a + b) * (c + d) * (a + c) * (b + d)));
+    
+    if (denominator < 1e-15) {
+        return 0.0;
+    }
+    
+    return numerator / denominator;
+}
+
+std::vector<int> CorPhi::createContingencyTable(const double *x, const double *y, size_t n) {
+    int a = 0, b = 0, c = 0, d = 0; // Contingency table counts
+    
+    for (size_t i = 0; i < n; ++i) {
+        if (x[i] == 1.0 && y[i] == 1.0) {
+            a++; // (1,1)
+        } else if (x[i] == 1.0 && y[i] == 0.0) {
+            b++; // (1,0)
+        } else if (x[i] == 0.0 && y[i] == 1.0) {
+            c++; // (0,1)
+        } else {
+            d++; // (0,0)
+        }
+    }
+    
+    return {a, b, c, d};
 }

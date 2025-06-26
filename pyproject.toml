@@ -1,0 +1,13 @@
+[tool.poetry]
+name = "netcor"
+version = "0.1.0"
+description = "pyNetCor: Correlation and information theory tools (C++/Python bindings)"
+authors = ["Your Name <your@email.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.12"
+numpy = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api" 

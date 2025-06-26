@@ -23,7 +23,7 @@ endif()
 message(STATUS "OpenBLAS_INCLUDE_DIRS: ${OpenBLAS_INCLUDE_DIRS}")
 message(STATUS "OpenBLAS_LIBRARIES: ${OpenBLAS_LIBRARIES}")
 
-set(SOURCES cor.cpp padjusttable.cpp ptable.cpp util.cpp cluster.cpp)
+set(SOURCES cor.cpp padjusttable.cpp ptable.cpp util.cpp cluster.cpp mutual_info.cpp)
 
 add_library(netcor SHARED ${SOURCES})
 
